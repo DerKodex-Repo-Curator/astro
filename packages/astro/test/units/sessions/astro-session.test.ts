@@ -25,7 +25,7 @@ interface MockCookies {
 const defaultMockCookies: MockCookies = {
 	set: () => {},
 	delete: () => {},
-	get: () => ({ value: 'sessionid' }),
+	get: () => ({ value: '00000000-0000-4000-8000-000000000000' }),
 };
 
 const stringify = (data: unknown) => JSON.parse(devalueStringify(data));
@@ -400,7 +400,7 @@ describe('AstroSession - Sparse Data Operations', () => {
 
 	it('should persist delete as the first mutation (no prior get/set)', async () => {
 		const store = new Map<string, string>();
-		const sessionId = 'sessionid';
+		const sessionId = '00000000-0000-4000-8000-000000000000';
 		store.set(sessionId, devalueStringify(new Map([['token', { data: 'secret' }]])));
 
 		const mockStorage = {
@@ -631,7 +631,7 @@ describe('AstroSession - No-Cookie Short Circuit', () => {
 			set: () => {},
 			delete: () => {},
 			get: (name: string) => {
-				if (name === 'test-session') return { value: 'existing-session-id' };
+				if (name === 'test-session') return { value: '00000000-0000-4000-8000-000000000002' };
 				return undefined;
 			},
 		};
@@ -664,18 +664,19 @@ describe('AstroSession - No-Cookie Short Circuit', () => {
 describe('AstroSession - regenerate() error path', () => {
 	it('should route errors to logger and reset #partial flag', async () => {
 		let storageGetCount = 0;
-		// The cookie mock returns 'old-session' so that ensureData() will try to
-		// load from storage using that key and hit the corrupt data path.
+		// Use a valid UUID so #ensureSessionID() accepts it and ensureData() tries
+		// to load from storage, hitting the corrupt data path.
+		const oldSessionUUID = '00000000-0000-4000-8000-000000000001';
 		const cookies: MockCookies = {
 			set: () => {},
 			delete: () => {},
-			get: (name: string) => (name === 'test-session' ? { value: 'old-session' } : undefined),
+			get: (name: string) => (name === 'test-session' ? { value: oldSessionUUID } : undefined),
 		};
 		const spyLogger = new SpyLogger();
 		const mockStorage = {
 			async get(key: string) {
 				storageGetCount++;
-				if (key === 'old-session') {
+				if (key === oldSessionUUID) {
 					// Return a string that unflatten() will parse into an Array, not a Map.
 					// This causes unflatten(raw) instanceof Map to be false, throwing an AstroError.
 					return '[1,2,3]';
@@ -731,6 +732,45 @@ describe('AstroSession - regenerate() error path', () => {
 			0,
 			'Should not round-trip to storage; #partial should be false after regeneration',
 		);
+	});
+});
+// #endregion
+
+// #region Session ID Validation
+describe('AstroSession - Session ID Validation', () => {
+	it('rejects a non-UUID session cookie value and generates a new ID', async () => {
+		const cookies: MockCookies = {
+			set: () => {},
+			delete: () => {},
+			get: (name: string) =>
+				name === 'test-session' ? { value: 'not-a-uuid-at-all' } : undefined,
+		};
+
+		const session = createSession(defaultConfig, cookies);
+		session.set('key', 'value');
+
+		const id = session.sessionID;
+		assert.ok(id, 'Session ID should be set');
+		assert.notEqual(id, 'not-a-uuid-at-all', 'Should not accept non-UUID cookie value');
+		assert.match(
+			id!,
+			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+			'Should generate a valid UUID',
+		);
+	});
+
+	it('accepts a valid UUID session cookie value', async () => {
+		const validUUID = '550e8400-e29b-41d4-a716-446655440000';
+		const cookies: MockCookies = {
+			set: () => {},
+			delete: () => {},
+			get: (name: string) => (name === 'test-session' ? { value: validUUID } : undefined),
+		};
+
+		const session = createSession(defaultConfig, cookies);
+		session.set('key', 'value');
+
+		assert.equal(session.sessionID, validUUID, 'Should preserve valid UUID from cookie');
 	});
 });
 // #endregion
