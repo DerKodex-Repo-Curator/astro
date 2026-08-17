@@ -125,6 +125,34 @@ describe('FetchState (astro/fetch)', () => {
 		assert.equal(state.routeData!.type, 'endpoint');
 		assert.equal(state.pathname, '/file.html', '.html should be preserved for endpoint routes');
 	});
+
+	it('restores trailing slash after stripping .html when trailingSlash is always', () => {
+		// Regression test for #17726: with build.format 'preserve' and
+		// trailingSlash 'always', the build URL for a non-index page ends
+		// with .html. FetchState strips that suffix but must re-add the
+		// trailing slash so the pathname matches the route pattern compiled
+		// with trailingSlash 'always'.
+		const page = createPage(simplePage, {
+			route: '/[category]/[slug]/detail',
+			pathname: undefined,
+			segments: [
+				[dynamicPart('category')],
+				[dynamicPart('slug')],
+				[{ content: 'detail', dynamic: false, spread: false }],
+			],
+			trailingSlash: 'always',
+		});
+		const app = createTestApp([page], { trailingSlash: 'always', buildFormat: 'preserve' });
+		const request = stampApp(new Request('http://example.com/news/hello/detail.html'), app);
+		const state = new FetchState(request);
+
+		assert.ok(state.routeData, 'routeData should be set');
+		assert.equal(
+			state.pathname,
+			'/news/hello/detail/',
+			'pathname should have trailing slash after stripping .html when trailingSlash is always',
+		);
+	});
 });
 
 // #endregion
